@@ -4,6 +4,7 @@ Logistics Agent - Query vessel arrivals data and answer questions
 import os
 from typing import TypedDict, Annotated, Literal
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode
@@ -31,15 +32,17 @@ llm = ChatGoogleGenerativeAI(
 
 @tool
 def query_vessel_data(
+    chokepoint: str,
     start_date: str = None,
     end_date: str = None,
     vessel_type: str = None,
     aggregate: str = "none"
 ) -> str:
     """
-    Query vessel arrivals data from the Bab el-Mandeb chokepoint.
+    Query vessel arrivals data from various maritime chokepoints.
 
     Args:
+        chokepoint: Chokepoint name (bab-el-mandeb, suez-canal, panama-canal, strait-of-hormuz, strait-of-malacca, bosporus-strait)
         start_date: Start date in YYYY-MM-DD format (optional)
         end_date: End date in YYYY-MM-DD format (optional)
         vessel_type: Type of vessel to filter: container, dry_bulk, tanker, general_cargo, roro (optional)
@@ -49,9 +52,18 @@ def query_vessel_data(
         String containing the queried data in a readable format
     """
     try:
+        # Validate chokepoint
+        valid_chokepoints = ['bab-el-mandeb', 'suez-canal', 'panama-canal', 'strait-of-hormuz', 'strait-of-malacca', 'bosporus-strait']
+        if chokepoint not in valid_chokepoints:
+            return f"Error: Invalid chokepoint. Must be one of {valid_chokepoints}"
+
         # Load data from SeeSeaIntelligence
-        project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
-        data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / 'bab-el-mandeb' / 'vessel_arrivals' / 'vessel_arrivals.csv'
+        # Check if running in Docker (mounted at /data/processed) or local dev
+        if Path('/data/processed').exists():
+            data_path = Path(f'/data/processed/logistics/chokepoints/{chokepoint}/vessel_arrivals/vessel_arrivals.csv')
+        else:
+            project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
+            data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / chokepoint / 'vessel_arrivals' / 'vessel_arrivals.csv'
 
         if not data_path.exists():
             return f"Error: Data file not found at {data_path}"
@@ -100,18 +112,42 @@ def query_vessel_data(
 
 
 @tool
-def get_data_summary() -> str:
+def get_data_summary(chokepoint: str = None) -> str:
     """
     Get a summary of the vessel arrivals dataset including date range,
-    total records, and basic statistics.
+    total records, and basic statistics. If no chokepoint specified, lists all available chokepoints.
+
+    Args:
+        chokepoint: Chokepoint name (optional). If not specified, lists all available chokepoints.
 
     Returns:
         String containing dataset summary
     """
     try:
+        # If no chokepoint specified, list all available
+        if not chokepoint:
+            return """Available Chokepoints:
+1. bab-el-mandeb - Bab el-Mandeb Strait (Red Sea entrance)
+2. suez-canal - Suez Canal (Egypt)
+3. panama-canal - Panama Canal (Central America)
+4. strait-of-hormuz - Strait of Hormuz (Persian Gulf)
+5. strait-of-malacca - Strait of Malacca (Southeast Asia)
+6. bosporus-strait - Bosporus Strait (Turkey)
+
+Use get_data_summary with a specific chokepoint name to see details."""
+
+        # Validate chokepoint
+        valid_chokepoints = ['bab-el-mandeb', 'suez-canal', 'panama-canal', 'strait-of-hormuz', 'strait-of-malacca', 'bosporus-strait']
+        if chokepoint not in valid_chokepoints:
+            return f"Error: Invalid chokepoint. Must be one of {valid_chokepoints}"
+
         # Load data from SeeSeaIntelligence
-        project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
-        data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / 'bab-el-mandeb' / 'vessel_arrivals' / 'vessel_arrivals.csv'
+        # Check if running in Docker (mounted at /data/processed) or local dev
+        if Path('/data/processed').exists():
+            data_path = Path(f'/data/processed/logistics/chokepoints/{chokepoint}/vessel_arrivals/vessel_arrivals.csv')
+        else:
+            project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
+            data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / chokepoint / 'vessel_arrivals' / 'vessel_arrivals.csv'
 
         if not data_path.exists():
             return f"Error: Data file not found at {data_path}"
@@ -119,9 +155,13 @@ def get_data_summary() -> str:
         df = pd.read_csv(data_path, parse_dates=['date'])
         df.set_index('date', inplace=True)
 
+        # Format chokepoint name for display
+        chokepoint_display = chokepoint.replace('-', ' ').title()
+
         summary = f"""
-Dataset Summary - Bab el-Mandeb Vessel Arrivals
+Dataset Summary - {chokepoint_display} Vessel Arrivals
 ================================================
+Chokepoint: {chokepoint}
 Total Records: {len(df)}
 Date Range: {df.index.min().strftime('%Y-%m-%d')} to {df.index.max().strftime('%Y-%m-%d')}
 
@@ -143,6 +183,7 @@ Statistics (all data):
 
 @tool
 def compare_periods(
+    chokepoint: str,
     period1_start: str,
     period1_end: str,
     period2_start: str,
@@ -150,9 +191,10 @@ def compare_periods(
     vessel_type: str = None
 ) -> str:
     """
-    Compare vessel arrivals between two time periods.
+    Compare vessel arrivals between two time periods for a specific chokepoint.
 
     Args:
+        chokepoint: Chokepoint name (bab-el-mandeb, suez-canal, panama-canal, strait-of-hormuz, strait-of-malacca, bosporus-strait)
         period1_start: Start date of first period (YYYY-MM-DD)
         period1_end: End date of first period (YYYY-MM-DD)
         period2_start: Start date of second period (YYYY-MM-DD)
@@ -163,9 +205,17 @@ def compare_periods(
         String containing comparison results
     """
     try:
+        # Validate chokepoint
+        valid_chokepoints = ['bab-el-mandeb', 'suez-canal', 'panama-canal', 'strait-of-hormuz', 'strait-of-malacca', 'bosporus-strait']
+        if chokepoint not in valid_chokepoints:
+            return f"Error: Invalid chokepoint. Must be one of {valid_chokepoints}"
+
         # Load data from SeeSeaIntelligence
-        project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
-        data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / 'bab-el-mandeb' / 'vessel_arrivals' / 'vessel_arrivals.csv'
+        if Path('/data/processed').exists():
+            data_path = Path(f'/data/processed/logistics/chokepoints/{chokepoint}/vessel_arrivals/vessel_arrivals.csv')
+        else:
+            project_root = Path(__file__).parent.parent / 'SeeSeaIntelligence'
+            data_path = project_root / 'processed' / 'logistics' / 'chokepoints' / chokepoint / 'vessel_arrivals' / 'vessel_arrivals.csv'
 
         df = pd.read_csv(data_path, parse_dates=['date'])
         df.set_index('date', inplace=True)
@@ -245,22 +295,39 @@ def call_model(state: MessagesState):
     # Add system message if first user message
     has_system = any(isinstance(m, SystemMessage) for m in messages)
     if not has_system:
-        system_message = SystemMessage(content="""You are a logistics analyst assistant specialized in vessel traffic data at the Bab el-Mandeb strait chokepoint.
+        # Get current date/time for context
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-You have access to historical vessel arrivals data from 2019-01-01 to 2026-01-25 (including 2026 data).
+        system_message = SystemMessage(content=f"""You are a logistics analyst assistant specialized in vessel traffic data at major maritime chokepoints worldwide.
 
-IMPORTANT: You MUST use the available tools to query the actual data. DO NOT make assumptions about what data is available - always call the tools first.
+CURRENT DATE AND TIME: {current_datetime} (UTC+8 Taipei Time)
+
+You have access to historical vessel arrivals data for multiple chokepoints:
+1. Bab el-Mandeb Strait (bab-el-mandeb) - Red Sea entrance
+2. Suez Canal (suez-canal) - Egypt
+3. Panama Canal (panama-canal) - Central America
+4. Strait of Hormuz (strait-of-hormuz) - Persian Gulf
+5. Strait of Malacca (strait-of-malacca) - Southeast Asia
+6. Bosporus Strait (bosporus-strait) - Turkey
+
+CRITICAL RULES:
+1. You MUST IMMEDIATELY use tools to query data - DO NOT ask users what they want to see
+2. When users ask about "recent" traffic, automatically query the last 30 days from today's date
+3. When users ask general questions like "how is the traffic", provide actual numbers using query_vessel_data
+4. NEVER say "I can query" or "Would you like me to check" - JUST DO IT
+5. If a query is vague, make reasonable assumptions and query the data
 
 Available tools:
-- get_data_summary: Get overall dataset summary and statistics
-- query_vessel_data: Query specific date ranges and vessel types
-- compare_periods: Compare traffic between two time periods
+- get_data_summary: Get overall dataset summary and statistics for a chokepoint (or list all if no chokepoint specified)
+- query_vessel_data: Query specific date ranges and vessel types for a chokepoint (REQUIRED for all traffic questions)
+- compare_periods: Compare traffic between two time periods for a chokepoint
 
-When answering questions:
-1. ALWAYS use the tools to fetch actual data from the database
-2. Provide clear, data-driven answers based on the tool results
-3. Include relevant context (dates, vessel types, trends)
-4. Explain what the data means in practical terms
+Response Guidelines:
+1. For "recent" or "latest" → query last 30 days automatically
+2. For general questions → query last 30 days and compare with same period last year
+3. ALWAYS provide actual numbers, never just say "I can check"
+4. Include trends, comparisons, and insights automatically
 
 Vessel types available:
 - container: Container ships
